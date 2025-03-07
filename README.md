@@ -1,10 +1,13 @@
 # KtuvitBot
+<p align="center">
+  <img src="https://i.imgur.com/T8DNS5S.jpeg" alt="KtuvitBot Logo" width="200"/>
+</p>
 
-**KtuvitBot** is a Telegram bot that generates subtitles for videos in different languages using OpenAI's Whisper API for transcription and GPT-4O for translation. The bot also applies RTL fixes for Hebrew and supports daily usage limits for free users.
+**KtuvitBot** is a Telegram bot that generates subtitles for videos in different languages using OpenAI's Whisper API for transcription and GPT-4o for translation. The bot also applies RTL fixes for Hebrew and supports daily usage limits for free users.
 
 ## 🚀 Features
 
-- 🎥 **Transcribes and translates video subtitles** using Whisper and GPT-4O
+- 🎥 **Transcribes and translates video subtitles** using Whisper and GPT-4o
 - 🌍 **Supports multiple languages** with per-user settings
 - 🌀 **Applies RTL fixes** for Hebrew subtitles to ensure proper punctuation display
 - 🔄 **Limits free users to 5 videos per day** (no limit for whitelisted users)
