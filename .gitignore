@@ -1,0 +1,8 @@
+venv/
+bot.log
+__pycache__/
+old/
+*.pyc
+*.log
+allowed_users.txt
+run.sh
