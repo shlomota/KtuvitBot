@@ -156,6 +156,13 @@ def handle_media(update: Update, context: CallbackContext):
             output_video_path = os.path.join(tmpdir, f"{filename_base}_sub.mp4")
             translated_srt_path = os.path.join(tmpdir, f"{filename_base}_translated.srt")
 
+            if media_file.file_size and media_file.file_size > 20 * 1024 * 1024:
+                update.message.reply_text(
+                    "File is too large (over 20MB). Please compress it and try uploading again."
+                )
+                return
+
+
             send_status(update, context, "Downloading file...")
             media = context.bot.get_file(media_file.file_id)
             media.download(media_path)
@@ -204,7 +211,12 @@ def handle_media(update: Update, context: CallbackContext):
 
             if not is_audio:
                 send_status(update, context, "Embedding translated subtitles into video...")
-                ffmpeg.input(media_path).output(output_video_path, vf=f"subtitles={translated_srt_path}").run(quiet=True)
+                #ffmpeg.input(media_path).output(output_video_path, vf=f"subtitles={translated_srt_path}").run(quiet=True)
+
+                ffmpeg.input(media_path).output(
+                    output_video_path,
+                    vf="subtitles={}:force_style='FontSize=28,PrimaryColour=&H0000FFFF,OutlineColour=&H80000000,BorderStyle=3,Outline=1,Shadow=0,MarginV=20'".format(translated_srt_path)
+                ).run(quiet=True)
 
                 send_status(update, context, f"Uploading video with {target_language} subtitles!")
                 with open(output_video_path, 'rb') as video_file:
