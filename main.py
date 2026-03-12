@@ -102,8 +102,11 @@ logging.info(f"Loaded {len(tier_users)} tiered users.")
 # --- Metrics ---
 
 def record_metric(user_id, msg_type):
-        """Record a user interaction. msg_type: 'cmd' or 'vid'"""
+        """Record a user interaction. msg_type: 'cmd' or 'vid'
+        Storage format: { date: { user_id: { cmd: N, vid: N } } }
+        """
         today = date.today().isoformat()
+        uid_str = str(user_id)
         with metrics_lock:
             metrics = {}
             try:
@@ -112,37 +115,47 @@ def record_metric(user_id, msg_type):
             except (FileNotFoundError, json.JSONDecodeError):
                 pass
 
-            if today not in metrics:
-                metrics[today] = {'users': [], 'cmd_messages': 0, 'vid_messages': 0}
+            if today not in metrics or not isinstance(metrics[today], dict):
+                metrics[today] = {}
+            if uid_str not in metrics[today] or not isinstance(metrics[today][uid_str], dict):
+                metrics[today][uid_str] = {'cmd': 0, 'vid': 0}
 
-            uid_str = str(user_id)
-            if uid_str not in metrics[today]['users']:
-                metrics[today]['users'].append(uid_str)
-
-            if msg_type == 'cmd':
-                metrics[today]['cmd_messages'] += 1
-            elif msg_type == 'vid':
-                metrics[today]['vid_messages'] += 1
+            metrics[today][uid_str][msg_type] = metrics[today][uid_str].get(msg_type, 0) + 1
 
             with open(METRICS_FILE, 'w') as f:
                 json.dump(metrics, f)
 
-def get_metrics_for_range(metrics, days):
-        """Aggregate metrics over the last `days` days (inclusive of today)."""
+def _days_in_range(metrics, days):
+        """Yield (date, user_id, counts) tuples for the last `days` days."""
         cutoff = date.today() - timedelta(days=days - 1)
-        users = set()
-        cmd_msgs = 0
-        vid_msgs = 0
-        for date_str, data in metrics.items():
+        for date_str, day_data in metrics.items():
             try:
                 d = date.fromisoformat(date_str)
             except ValueError:
                 continue
-            if d >= cutoff:
-                users.update(data.get('users', []))
-                cmd_msgs += data.get('cmd_messages', 0)
-                vid_msgs += data.get('vid_messages', 0)
-        return len(users), cmd_msgs, vid_msgs
+            if d >= cutoff and isinstance(day_data, dict):
+                for uid, counts in day_data.items():
+                    if isinstance(counts, dict):
+                        yield date_str, uid, counts
+
+def get_metrics_for_range(metrics, days):
+        """Returns (unique_users, total_cmds, total_vids) over last `days` days."""
+        users, cmds, vids = set(), 0, 0
+        for _, uid, counts in _days_in_range(metrics, days):
+            users.add(uid)
+            cmds += counts.get('cmd', 0)
+            vids += counts.get('vid', 0)
+        return len(users), cmds, vids
+
+def get_leaderboard(metrics, days, top_n=15):
+        """Returns list of (user_id, cmd, vid) sorted by total activity."""
+        totals = {}
+        for _, uid, counts in _days_in_range(metrics, days):
+            if uid not in totals:
+                totals[uid] = {'cmd': 0, 'vid': 0}
+            totals[uid]['cmd'] += counts.get('cmd', 0)
+            totals[uid]['vid'] += counts.get('vid', 0)
+        return sorted(totals.items(), key=lambda x: x[1]['cmd'] + x[1]['vid'], reverse=True)[:top_n]
 
 def metrics_command(update: Update, context: CallbackContext):
         user_id = update.message.from_user.id
@@ -161,13 +174,22 @@ def metrics_command(update: Update, context: CallbackContext):
         u7, c7, v7 = get_metrics_for_range(metrics, 7)
         u30, c30, v30 = get_metrics_for_range(metrics, 30)
 
-        msg = (
+        update.message.reply_text(
             "Bot Metrics\n\n"
-            f"Today:     {u1} users | {c1} commands | {v1} videos\n"
-            f"Last 7d:   {u7} users | {c7} commands | {v7} videos\n"
-            f"Last 30d:  {u30} users | {c30} commands | {v30} videos"
+            f"Today:     {u1} users | {c1} cmds | {v1} vids\n"
+            f"Last 7d:   {u7} users | {c7} cmds | {v7} vids\n"
+            f"Last 30d:  {u30} users | {c30} cmds | {v30} vids"
         )
-        update.message.reply_text(msg)
+
+        if user_id in user_verbose:
+            board = get_leaderboard(metrics, 30)
+            if board:
+                lines = ["Leaderboard — last 30d\n"]
+                for i, (uid, counts) in enumerate(board, 1):
+                    total = counts['cmd'] + counts['vid']
+                    lines.append(f"{i}. {uid}: {counts['vid']} vids | {counts['cmd']} cmds | {total} total")
+                update.message.reply_text("\n".join(lines))
+
         record_metric(user_id, 'cmd')
 
 # --- Tier upgrades ---
