@@ -3,14 +3,19 @@
   <img src="https://i.imgur.com/T8DNS5S.jpeg" alt="KtuvitBot Logo" width="200"/>
 </p>
 
-**KtuvitBot** is a Telegram bot that generates subtitles for videos in different languages using OpenAI's Whisper API for transcription and GPT-4o for translation. The bot also applies RTL fixes for Hebrew and supports daily usage limits for free users.
+**KtuvitBot** is a Telegram bot that generates subtitles for videos in different languages using OpenAI's Whisper for transcription and GPT-5.1 for translation. The bot burns subtitles into the video and also delivers the SRT files directly.
 
 ## 🚀 Features
 
-- 🎥 **Transcribes and translates video subtitles** using Whisper and GPT-4o
-- 🌍 **Supports multiple languages** with per-user settings
-- 🌀 **Applies RTL fixes** for Hebrew subtitles to ensure proper punctuation display
-- 🔄 **Limits free users to 5 videos per day** (no limit for whitelisted users)
+- 🎥 **Transcribes and translates video subtitles** — burns subtitles into video and sends SRT files
+- 🤖 **Models**: `whisper-1` for transcription, `gpt-5.1` for translation
+- 🔬 **Enhance mode** (`/enhance`) — runs `gpt-4o-transcribe` in parallel with Whisper and uses AI to merge the best of both for improved accuracy
+- 🌍 **Supports multiple languages** via `/setlanguage <language>`
+- 🌀 **Applies RTL fixes** for Hebrew subtitles
+- 📊 **Daily usage limits**: 5/day free, 10/day (send `AmYisraelChai`), 50/day (`/shared <social-link>`)
+- 🔑 **Unlimited access** for whitelisted users (`allowed_users.txt`)
+- 📈 **Admin metrics** via `/metrics` (whitelisted users only) — usage stats for today, 7d, 30d
+- 🔎 **Verbose mode** (`/verbose`) — also sends all SRT stages as text messages
 - 📢 **Sends status updates** to users during processing
 
 ## 📦 Installation

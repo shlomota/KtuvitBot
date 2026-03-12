@@ -45,6 +45,9 @@ user_languages = defaultdict(lambda: "Hebrew")
 # Users with verbose mode enabled (also send SRT as text)
 user_verbose = set()
 
+# Users with enhance mode enabled (parallel gpt-4o-transcribe + alignment)
+user_enhance = set()
+
 # Locks
 tier_lock = threading.Lock()
 metrics_lock = threading.Lock()
@@ -277,7 +280,8 @@ def start(update: Update, context: CallbackContext):
             f"Your daily limit: {limit} requests.\n"
             "Send AmYisraelChai to unlock 10/day.\n"
             "Share this bot on social media and send /shared <link> to unlock 50/day.\n\n"
-            "Use /verbose to also receive subtitles as text."
+            "Use /verbose to also receive subtitles as text.\n"
+            "Use /enhance to enable experimental AI transcription improvement."
         )
         record_metric(user_id, 'cmd')
 
@@ -291,6 +295,21 @@ def verbose_command(update: Update, context: CallbackContext):
             user_verbose.add(user_id)
             update.message.reply_text("Verbose mode ON. I will also send the translated SRT as text.")
         logging.info(f"User {user_id} toggled verbose mode: {'ON' if user_id in user_verbose else 'OFF'}")
+        record_metric(user_id, 'cmd')
+
+# Command to toggle enhance mode (parallel gpt-4o-transcribe + AI alignment)
+def enhance_command(update: Update, context: CallbackContext):
+        user_id = update.message.from_user.id
+        if user_id in user_enhance:
+            user_enhance.discard(user_id)
+            update.message.reply_text("Enhance mode OFF. Using Whisper transcription only.")
+        else:
+            user_enhance.add(user_id)
+            update.message.reply_text(
+                "Enhance mode ON. Whisper and gpt-4o-transcribe will run in parallel and "
+                "an AI will merge the best of both for improved accuracy."
+            )
+        logging.info(f"User {user_id} toggled enhance mode: {'ON' if user_id in user_enhance else 'OFF'}")
         record_metric(user_id, 'cmd')
 
 # Command to set the target language
@@ -460,14 +479,19 @@ def handle_media(update: Update, context: CallbackContext):
                 ffmpeg.input(media_path).output(audio_path, acodec='libmp3lame', ab='128k').run(quiet=True)
 
             send_status(update, context, "Transcribing audio...")
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                whisper_future = executor.submit(transcribe_whisper, audio_path)
-                gpt4o_future = executor.submit(transcribe_gpt4o, audio_path)
-                whisper_srt = whisper_future.result()
-                accurate_text = gpt4o_future.result()
+            whisper_srt = transcribe_whisper(audio_path)
+            accurate_text = None
 
-            send_status(update, context, "Aligning transcription...")
-            result = align_transcription(whisper_srt, accurate_text)
+            if user_id in user_enhance:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    whisper_future = executor.submit(transcribe_whisper, audio_path)
+                    gpt4o_future = executor.submit(transcribe_gpt4o, audio_path)
+                    whisper_srt = whisper_future.result()
+                    accurate_text = gpt4o_future.result()
+                send_status(update, context, "Aligning transcription...")
+                result = align_transcription(whisper_srt, accurate_text)
+            else:
+                result = whisper_srt
 
             original_srt_path = os.path.join(tmpdir, f"{filename_base}_original.srt")
 
@@ -497,12 +521,13 @@ def handle_media(update: Update, context: CallbackContext):
                 context.bot.send_document(chat_id=update.message.chat_id, document=srt_file, filename=f"{filename_base}_translated_{target_language}.srt")
 
             if user_id in user_verbose:
-                context.bot.send_message(chat_id=update.message.chat_id, text="--- Whisper SRT (raw) ---")
+                context.bot.send_message(chat_id=update.message.chat_id, text="--- Whisper SRT ---")
                 context.bot.send_message(chat_id=update.message.chat_id, text=whisper_srt)
-                context.bot.send_message(chat_id=update.message.chat_id, text="--- gpt-4o-transcribe (accurate text) ---")
-                context.bot.send_message(chat_id=update.message.chat_id, text=accurate_text)
-                context.bot.send_message(chat_id=update.message.chat_id, text="--- Aligned SRT ---")
-                context.bot.send_message(chat_id=update.message.chat_id, text=result)
+                if accurate_text:
+                    context.bot.send_message(chat_id=update.message.chat_id, text="--- gpt-4o-transcribe ---")
+                    context.bot.send_message(chat_id=update.message.chat_id, text=accurate_text)
+                    context.bot.send_message(chat_id=update.message.chat_id, text="--- Aligned SRT ---")
+                    context.bot.send_message(chat_id=update.message.chat_id, text=result)
                 context.bot.send_message(chat_id=update.message.chat_id, text="--- Translated SRT ---")
                 context.bot.send_message(chat_id=update.message.chat_id, text=translated_srt)
 
@@ -526,6 +551,7 @@ def main():
         dp.add_handler(CommandHandler("start", start))
         dp.add_handler(CommandHandler("setlanguage", set_language))
         dp.add_handler(CommandHandler("verbose", verbose_command))
+        dp.add_handler(CommandHandler("enhance", enhance_command))
         dp.add_handler(CommandHandler("metrics", metrics_command))
         dp.add_handler(CommandHandler("shared", shared_command))
         dp.add_handler(MessageHandler(Filters.text & Filters.regex(r'^AmYisraelChai$'), upgrade_tier10))
