@@ -494,8 +494,13 @@ def handle_media(update: Update, context: CallbackContext):
                 context.bot.send_document(chat_id=update.message.chat_id, document=srt_file, filename=f"{filename_base}_translated_{target_language}.srt")
 
             if user_id in user_verbose:
+                context.bot.send_message(chat_id=update.message.chat_id, text="--- Whisper SRT (raw) ---")
                 context.bot.send_message(chat_id=update.message.chat_id, text=whisper_srt)
+                context.bot.send_message(chat_id=update.message.chat_id, text="--- gpt-4o-transcribe (accurate text) ---")
+                context.bot.send_message(chat_id=update.message.chat_id, text=accurate_text)
+                context.bot.send_message(chat_id=update.message.chat_id, text="--- Aligned SRT ---")
                 context.bot.send_message(chat_id=update.message.chat_id, text=result)
+                context.bot.send_message(chat_id=update.message.chat_id, text="--- Translated SRT ---")
                 context.bot.send_message(chat_id=update.message.chat_id, text=translated_srt)
 
             if not is_audio:
