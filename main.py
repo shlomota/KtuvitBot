@@ -3,7 +3,8 @@ import json
 import csv
 import re
 import threading
-import openai  # OpenAI GPT-4O API
+from concurrent.futures import ThreadPoolExecutor
+from openai import OpenAI
 import ffmpeg
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
@@ -26,7 +27,10 @@ logging.basicConfig(
 
 # Set API keys
 TELEGRAM_BOT_TOKEN = os.getenv('KTUVIT_TELEGRAM_BOT_TOKEN')
-openai.api_key = os.getenv('OPENAI_API_KEY')
+openai_client = OpenAI()  # picks up OPENAI_API_KEY from env
+
+# Model for all LLM calls (translation, alignment)
+LLM_MODEL = "gpt-5.1"
 
 # Default target language
 default_language = 'Hebrew'
@@ -307,30 +311,92 @@ def set_language(update: Update, context: CallbackContext):
             update.message.reply_text("Please specify a language name. Example: /setlanguage Spanish")
         record_metric(user_id, 'cmd')
 
-# Translate SRT to target language using GPT-4O
+# --- Transcription helpers ---
+
+def transcribe_whisper(audio_path: str) -> str:
+        """Transcribe with whisper-1, returns SRT string (accurate timestamps)."""
+        logging.info("Transcribing with whisper-1 (SRT)...")
+        with open(audio_path, "rb") as f:
+            return openai_client.audio.transcriptions.create(
+                model="whisper-1", file=f, response_format="srt"
+            )
+
+def transcribe_gpt4o(audio_path: str) -> str:
+        """Transcribe with gpt-4o-transcribe, returns plain text (accurate words)."""
+        logging.info("Transcribing with gpt-4o-transcribe (JSON)...")
+        with open(audio_path, "rb") as f:
+            result = openai_client.audio.transcriptions.create(
+                model="gpt-4o-transcribe", file=f, response_format="json"
+            )
+        return result.text
+
+def align_transcription(whisper_srt: str, accurate_text: str) -> str:
+        """Replace whisper segment text with accurate_text while preserving all timestamps."""
+        logging.info("Aligning accurate transcript onto whisper timestamps...")
+        response = openai_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a subtitle editor. You receive a Whisper-generated SRT file "
+                        "(accurate timestamps, possibly inaccurate text) and a more accurate transcript. "
+                        "Produce a corrected SRT by following these rules strictly:\n"
+                        "1. Keep every segment index and timestamp exactly as-is.\n"
+                        "2. Keep the same number of segments as the input SRT.\n"
+                        "3. Replace only the subtitle text using the accurate transcript, "
+                        "distributing it naturally across segments to match the audio pacing.\n"
+                        "4. Return only the corrected SRT between <srt> and </srt> tags. No other text."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"WHISPER SRT:\n{whisper_srt}\n\n"
+                        f"ACCURATE TRANSCRIPT:\n{accurate_text}"
+                    )
+                }
+            ],
+            max_tokens=4000
+        )
+        content = response.choices[0].message.content.strip()
+        if '<srt>' in content and '</srt>' in content:
+            content = content.split('<srt>')[1].split('</srt>')[0].strip()
+        return content
+
+# Translate SRT to target language
 def translate_srt(srt_content: str, target_language: str) -> str:
-        logging.info(f"Translating SRT to {target_language} using GPT-4O...")
+        logging.info(f"Translating SRT to {target_language} using {LLM_MODEL}...")
 
         is_rtl = target_language.lower() == "hebrew"
 
-        response = openai.ChatCompletion.create(
-            model="gpt-4o",
+        response = openai_client.chat.completions.create(
+            model=LLM_MODEL,
             messages=[
-                {"role": "system", "content": "You are a professional translator."},
-                {"role": "user", "content": (
-                    f"Translate the following SRT subtitles to {target_language} while preserving the exact SRT format. "
-                    "Return only the translated SRT content between <start> and <end> tags, without any additional explanations or text. "
-                    "Do not modify the timestamps or numbers in the SRT file.\n\n"
-                    f"{srt_content}"
-                )}
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a professional subtitle translator. "
+                        "Translate subtitle text accurately while preserving natural phrasing for the target language."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Translate the following SRT subtitles to {target_language}. Rules:\n"
+                        "1. Preserve every segment index and timestamp exactly.\n"
+                        "2. Translate only the subtitle text lines.\n"
+                        "3. Return only the translated SRT between <srt> and </srt> tags. No other text.\n\n"
+                        f"{srt_content}"
+                    )
+                }
             ],
-            max_tokens=3000
+            max_tokens=4000
         )
 
-        translated_content = response['choices'][0]['message']['content'].strip()
-
-        if '<start>' in translated_content and '<end>' in translated_content:
-            translated_content = translated_content.split('<start>')[1].split('<end>')[0].strip()
+        translated_content = response.choices[0].message.content.strip()
+        if '<srt>' in translated_content and '</srt>' in translated_content:
+            translated_content = translated_content.split('<srt>')[1].split('</srt>')[0].strip()
 
         if is_rtl:
             logging.info("Applying RTL fix for Hebrew subtitles...")
@@ -391,12 +457,14 @@ def handle_media(update: Update, context: CallbackContext):
                 ffmpeg.input(media_path).output(audio_path, acodec='libmp3lame', ab='128k').run(quiet=True)
 
             send_status(update, context, "Transcribing audio...")
-            with open(audio_path, "rb") as audio_file:
-                result = openai.Audio.transcribe(
-                    model="whisper-1",
-                    file=audio_file,
-                    response_format="srt"
-                )
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                whisper_future = executor.submit(transcribe_whisper, audio_path)
+                gpt4o_future = executor.submit(transcribe_gpt4o, audio_path)
+                whisper_srt = whisper_future.result()
+                accurate_text = gpt4o_future.result()
+
+            send_status(update, context, "Aligning transcription...")
+            result = align_transcription(whisper_srt, accurate_text)
 
             original_srt_path = os.path.join(tmpdir, f"{filename_base}_original.srt")
 
@@ -426,6 +494,7 @@ def handle_media(update: Update, context: CallbackContext):
                 context.bot.send_document(chat_id=update.message.chat_id, document=srt_file, filename=f"{filename_base}_translated_{target_language}.srt")
 
             if user_id in user_verbose:
+                context.bot.send_message(chat_id=update.message.chat_id, text=whisper_srt)
                 context.bot.send_message(chat_id=update.message.chat_id, text=result)
                 context.bot.send_message(chat_id=update.message.chat_id, text=translated_srt)
 
