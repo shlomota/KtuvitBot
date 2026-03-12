@@ -339,13 +339,16 @@ def align_transcription(whisper_srt: str, accurate_text: str) -> str:
                 {
                     "role": "system",
                     "content": (
-                        "You are a subtitle editor. You receive a Whisper-generated SRT file "
-                        "(accurate timestamps, possibly inaccurate text) and a more accurate transcript. "
-                        "Produce a corrected SRT by following these rules strictly:\n"
+                        "You are a subtitle editor. You receive a Whisper SRT (accurate timestamps, "
+                        "may have transcription errors) and a secondary transcript from a different model "
+                        "(may be more accurate but can also be shorter, hallucinated, or miss content). "
+                        "Your job is to produce the best possible SRT using good judgment:\n"
                         "1. Keep every segment index and timestamp exactly as-is.\n"
                         "2. Keep the same number of segments as the input SRT.\n"
-                        "3. Replace only the subtitle text using the accurate transcript, "
-                        "distributing it naturally across segments to match the audio pacing.\n"
+                        "3. Use the Whisper text as the base. Only incorporate text from the secondary "
+                        "transcript where it clearly corrects a real error (wrong word, garbled phrase, "
+                        "obvious mishearing). Do NOT use the secondary transcript if it is shorter, "
+                        "drops words, or seems to paraphrase — prefer the Whisper text in those cases.\n"
                         "4. Return only the corrected SRT between <srt> and </srt> tags. No other text."
                     )
                 },
