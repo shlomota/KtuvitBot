@@ -161,6 +161,7 @@ def metrics_command(update: Update, context: CallbackContext):
             f"Last 30d:  {u30} users | {c30} commands | {v30} videos"
         )
         update.message.reply_text(msg)
+        record_metric(user_id, 'cmd')
 
 # --- Tier upgrades ---
 
@@ -231,6 +232,7 @@ def shared_command(update: Update, context: CallbackContext):
 
         logging.info(f"User {user_id} upgraded to tier 50 via share: {url}")
         update.message.reply_text("Thank you for sharing! You've been upgraded to 50 requests per day.")
+        record_metric(user_id, 'cmd')
 
 # --- Rate limiting ---
 
@@ -285,6 +287,7 @@ def verbose_command(update: Update, context: CallbackContext):
             user_verbose.add(user_id)
             update.message.reply_text("Verbose mode ON. I will also send the translated SRT as text.")
         logging.info(f"User {user_id} toggled verbose mode: {'ON' if user_id in user_verbose else 'OFF'}")
+        record_metric(user_id, 'cmd')
 
 # Command to set the target language
 def set_language(update: Update, context: CallbackContext):
