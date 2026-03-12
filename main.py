@@ -357,7 +357,7 @@ def align_transcription(whisper_srt: str, accurate_text: str) -> str:
                     )
                 }
             ],
-            max_tokens=4000
+            max_completion_tokens=4000
         )
         content = response.choices[0].message.content.strip()
         if '<srt>' in content and '</srt>' in content:
@@ -391,7 +391,7 @@ def translate_srt(srt_content: str, target_language: str) -> str:
                     )
                 }
             ],
-            max_tokens=4000
+            max_completion_tokens=4000
         )
 
         translated_content = response.choices[0].message.content.strip()
