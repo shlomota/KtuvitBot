@@ -38,6 +38,9 @@ user_last_reset = defaultdict(lambda: datetime.now())
 # Store user language preferences
 user_languages = defaultdict(lambda: "Hebrew")
 
+# Users with verbose mode enabled (also send SRT as text)
+user_verbose = set()
+
 # Locks
 tier_lock = threading.Lock()
 metrics_lock = threading.Lock()
@@ -267,9 +270,21 @@ def start(update: Update, context: CallbackContext):
             "Default language is Hebrew. Use /setlanguage <language> to change the subtitle language.\n\n"
             f"Your daily limit: {limit} requests.\n"
             "Send AmYisraelChai to unlock 10/day.\n"
-            "Share this bot on social media and send /shared <link> to unlock 50/day."
+            "Share this bot on social media and send /shared <link> to unlock 50/day.\n\n"
+            "Use /verbose to also receive subtitles as text."
         )
         record_metric(user_id, 'cmd')
+
+# Command to toggle verbose mode (also sends SRT content as text)
+def verbose_command(update: Update, context: CallbackContext):
+        user_id = update.message.from_user.id
+        if user_id in user_verbose:
+            user_verbose.discard(user_id)
+            update.message.reply_text("Verbose mode OFF.")
+        else:
+            user_verbose.add(user_id)
+            update.message.reply_text("Verbose mode ON. I will also send the translated SRT as text.")
+        logging.info(f"User {user_id} toggled verbose mode: {'ON' if user_id in user_verbose else 'OFF'}")
 
 # Command to set the target language
 def set_language(update: Update, context: CallbackContext):
@@ -407,6 +422,10 @@ def handle_media(update: Update, context: CallbackContext):
             with open(translated_srt_path, 'rb') as srt_file:
                 context.bot.send_document(chat_id=update.message.chat_id, document=srt_file, filename=f"{filename_base}_translated_{target_language}.srt")
 
+            if user_id in user_verbose:
+                context.bot.send_message(chat_id=update.message.chat_id, text=result)
+                context.bot.send_message(chat_id=update.message.chat_id, text=translated_srt)
+
             if not is_audio:
                 send_status(update, context, "Embedding translated subtitles into video...")
                 ffmpeg.input(media_path).output(
@@ -426,6 +445,7 @@ def main():
         dp = updater.dispatcher
         dp.add_handler(CommandHandler("start", start))
         dp.add_handler(CommandHandler("setlanguage", set_language))
+        dp.add_handler(CommandHandler("verbose", verbose_command))
         dp.add_handler(CommandHandler("metrics", metrics_command))
         dp.add_handler(CommandHandler("shared", shared_command))
         dp.add_handler(MessageHandler(Filters.text & Filters.regex(r'^AmYisraelChai$'), upgrade_tier10))
